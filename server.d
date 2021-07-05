@@ -1,16 +1,10 @@
 import std.stdio: stdin, writeln, writefln;
 import std.string: strip;
-import std.socket: Socket, TcpSocket, SocketOption, SocketOptionLevel, InternetAddress, SocketShutdown;
+import std.socket: Socket, TcpSocket, SocketOption, SocketOptionLevel, InternetAddress, SocketShutdown, SocketAcceptException;
 import std.concurrency: thisTid, Tid, send, spawn, receive, receiveOnly;
 import std.algorithm.iteration: filter;
 import std.array: array;
 import std.range.interfaces: InputRange;
-//import std.array: Range;
-//import std.range: Range;
-    
-class Lock 
-{
-}
 
 class ClientManager
 {
@@ -22,6 +16,7 @@ class ClientManager
     this() {
         server = new TcpSocket();
         server.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
+        server.blocking = false;
 
         server.bind(new InternetAddress(9999));
         server.listen(1);
@@ -38,13 +33,17 @@ class ClientManager
 
     void acceptConnection() {
         writeln("Checking for new connection");
-        // TODO: make this a nonblocking call
-        Socket client = server.accept();
+        try {
+            Socket client = server.accept();
+            writeln("Got new client!");
 
-        writeln("Sending welcome message");
-        client.send("Welcome");
+            writeln("Sending welcome message");
+            client.send("Welcome");
 
-        clients ~= client;
+            clients ~= client;
+        } catch (SocketAcceptException e) {
+            writeln("No new client received.");
+        }
     }
 
     void push(Socket value) {
@@ -82,9 +81,7 @@ void keyboardWatcherFunc(Tid parentTid)
 
 void main()
 {
-    //shared Lock lock = new shared(Lock)();
     ClientManager clientManager = new ClientManager();
-
     auto keyboardWatcher = spawn(&keyboardWatcherFunc, thisTid);
 
     while(true) {

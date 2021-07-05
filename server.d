@@ -1,7 +1,7 @@
 import std.stdio: stdin, writeln, writefln;
 import std.string: strip;
 import std.socket: Socket, TcpSocket, SocketOption, SocketOptionLevel, InternetAddress, SocketShutdown;
-import std.concurrency: thisTid, Tid, send, spawn, receive;
+import std.concurrency: thisTid, Tid, send, spawn, receive, receiveOnly;
 import std.algorithm.iteration: filter;
 import std.array: array;
 import std.range.interfaces: InputRange;
@@ -12,77 +12,91 @@ class Lock
 {
 }
 
-synchronized class ClientSet
+class ClientManager
 {
     // Note: must be private in synchronized
     // classes otherwise D complains.
     private Socket[] clients;
+    private Socket server;
 
-    void push(shared(Socket) value) {
-        clients ~= value;
-    }
-    
-    void cleanup() {
-        clients = filter!(s => s.isAlive)(clients).array;
-    }
+    this() {
+        server = new TcpSocket();
+        server.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
 
-    //Range!(Socket) iterator() {
-    InputRange!(Socket) iterator() {
-        return clients;
+        server.bind(new InternetAddress(9999));
+        server.listen(1);
     }
 
-    void messageClients()
+    ~this() 
     {
-
+        foreach (client; clients) {
+            client.close();
+            client.shutdown(SocketShutdown.BOTH);
+        }
+        server.close();
     }
-}
 
-void connectionListener(shared(Lock) lock, shared(ClientSet) connectedClients) 
-{
-    Socket server = new TcpSocket();
-    scope(exit) server.close();
-    server.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
-
-    server.bind(new InternetAddress(9999));
-    server.listen(1);
-
-    // TODO: handle the client disconection case
-
-    while (true) {
+    void acceptConnection() {
+        writeln("Checking for new connection");
+        // TODO: make this a nonblocking call
         Socket client = server.accept();
-
-        scope(exit) client.close();
-        scope(exit) client.shutdown(SocketShutdown.BOTH);
 
         writeln("Sending welcome message");
         client.send("Welcome");
 
-        synchronized(lock) {
-            connectedClients ~= client;
+        clients ~= client;
+    }
+
+    void push(Socket value) {
+        clients ~= value;
+    }
+    
+    void cleanup() {
+        auto toShutdown = filter!(s => !s.isAlive)(clients);
+
+        foreach (client; toShutdown) {
+            client.close();
+            client.shutdown(SocketShutdown.BOTH);
         }
+
+        clients = filter!(s => s.isAlive)(clients).array;
+    }
+
+    void messageClients(string s) {
+        writeln ("Clients before cleanup are: ", clients);
+        cleanup();
+        writeln ("Clients after cleanup are: ", clients);
+        writeln ("Sending message: ", s);
+        foreach (client; clients) {
+            client.send(s);
+        }
+    }
+}
+
+void keyboardWatcherFunc(Tid parentTid)
+{
+    while (true) {
+        send(parentTid, strip(stdin.readln()));
     }
 }
 
 void main()
 {
-    shared Lock lock = new shared(Lock)();
-    shared ClientSet connectedClients = new ClientSet();
+    //shared Lock lock = new shared(Lock)();
+    ClientManager clientManager = new ClientManager();
 
-    auto connectionListener = spawn(&connectionListener,
-            lock, 
-            connectedClients);
+    auto keyboardWatcher = spawn(&keyboardWatcherFunc, thisTid);
 
     while(true) {
-        auto barcodeInput = strip(stdin.readln());
-        writeln("KeyboardListenFunc got barcode input: ", barcodeInput);
+        clientManager.acceptConnection();
 
-        writeln ("Clients are: ", connectedClients);
-
-        synchronized(lock) {
-            connectedClients.cleanSockets();
-            foreach (client; connectedClients.iterator()) {
-                client.send(barcodeInput);
-            }
+        writeln("Checking for keyboard input.");
+        string barcodeInput = receiveOnly!string();
+        if (barcodeInput != null) {
+            writeln("KeyboardListenFunc got barcode input: ", barcodeInput);
+            clientManager.messageClients(barcodeInput);
+        } else {
+            writeln("No keyboard input.");
         }
     }
 }

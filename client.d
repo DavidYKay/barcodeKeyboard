@@ -14,7 +14,9 @@ void main() {
 
   while (true) {
       auto received = client.receive(buffer);
-      auto msg = buffer[0.. received];
-      writeln("Received msg: ", msg);
+      if (received > 0) {
+          auto msg = buffer[0.. received];
+          writeln("Received msg: ", msg);
+      }
   }
 }

@@ -9,8 +9,6 @@ import core.time: dur;
 
 class ClientManager
 {
-    // Note: must be private in synchronized
-    // classes otherwise D complains.
     private Socket[] clients;
     private Socket server;
 
@@ -36,9 +34,8 @@ class ClientManager
         writeln("Checking for new connection");
         try {
             Socket client = server.accept();
-            writeln("Got new client!");
 
-            writeln("Sending welcome message");
+            writeln("Sending welcome message to new client");
             client.send("Welcome");
 
             clients ~= client;
@@ -90,10 +87,11 @@ void main()
 
         writeln("Checking for keyboard input.");
 
-        receiveTimeout(dur!"msecs"(50),
-                (string s) {
+        receiveTimeout(
+            dur!"msecs"(50),
+            (string s) {
                 clientManager.messageClients(s);
-                }
-                );
+            }
+        );
     }
 }

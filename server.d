@@ -2,23 +2,51 @@ import std.stdio: stdin, writeln, writefln;
 import std.string: strip;
 import std.socket: Socket, TcpSocket, SocketOption, SocketOptionLevel, InternetAddress, SocketShutdown;
 import std.concurrency: thisTid, Tid, send, spawn, receive;
+import std.algorithm.iteration: filter;
+import std.array: array;
+import std.range.interfaces: InputRange;
+//import std.array: Range;
+//import std.range: Range;
     
-Socket[] clients = [];
-
-void socketSendFunc(Tid owner, Socket client) {
-    receive((string s) {
-            writefln("SocketSendFunc (%s) got message: %s ", owner, s);
-            client.send("Welcome from thread!");
-            });
+class Lock 
+{
 }
 
-void connectionListenerFunc(Tid owner) {
+synchronized class ClientSet
+{
+    // Note: must be private in synchronized
+    // classes otherwise D complains.
+    private Socket[] clients;
+
+    void push(shared(Socket) value) {
+        clients ~= value;
+    }
+    
+    void cleanup() {
+        clients = filter!(s => s.isAlive)(clients).array;
+    }
+
+    //Range!(Socket) iterator() {
+    InputRange!(Socket) iterator() {
+        return clients;
+    }
+
+    void messageClients()
+    {
+
+    }
+}
+
+void connectionListener(shared(Lock) lock, shared(ClientSet) connectedClients) 
+{
     Socket server = new TcpSocket();
     scope(exit) server.close();
     server.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
 
     server.bind(new InternetAddress(9999));
     server.listen(1);
+
+    // TODO: handle the client disconection case
 
     while (true) {
         Socket client = server.accept();
@@ -29,42 +57,32 @@ void connectionListenerFunc(Tid owner) {
         writeln("Sending welcome message");
         client.send("Welcome");
 
-        // Pass this client to a global list
-        //send(owner, client);
-        clients ~= client;
+        synchronized(lock) {
+            connectedClients ~= client;
+        }
     }
-}
-
-void keyboardListenFunc(Tid owner) {
-    auto barcodeInput = strip(stdin.readln());
-    writeln("KeyboardListenFunc got barcode input: ", barcodeInput);
-
-    send(owner, barcodeInput);
 }
 
 void main()
 {
-    auto keyboardListener   = spawn(&keyboardListenFunc,     thisTid);
-    auto connectionListener = spawn(&connectionListenerFunc, thisTid);
+    shared Lock lock = new shared(Lock)();
+    shared ClientSet connectedClients = new ClientSet();
+
+    auto connectionListener = spawn(&connectionListener,
+            lock, 
+            connectedClients);
 
     while(true) {
-        receive(
-                // TODO: handle the client disconection case
+        auto barcodeInput = strip(stdin.readln());
+        writeln("KeyboardListenFunc got barcode input: ", barcodeInput);
 
-                //(Socket client) {
-                //    // add to global list
-                //    client.send("Hello from main loop.");
-                //    clients ~= client;
-                //}
-                
-                (string barcodeInput) {
-                    writeln ("Clients are: ", clients);
+        writeln ("Clients are: ", connectedClients);
 
-                    writeln ("Sending message: ", barcodeInput);
-                    foreach (client; clients) {
-                        client.send(barcodeInput);
-                    }
-                }
-               );
+        synchronized(lock) {
+            connectedClients.cleanSockets();
+            foreach (client; connectedClients.iterator()) {
+                client.send(barcodeInput);
+            }
+        }
     }
 }

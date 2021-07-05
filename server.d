@@ -1,10 +1,11 @@
 import std.stdio: stdin, writeln, writefln;
 import std.string: strip;
 import std.socket: Socket, TcpSocket, SocketOption, SocketOptionLevel, InternetAddress, SocketShutdown, SocketAcceptException;
-import std.concurrency: thisTid, Tid, send, spawn, receive, receiveOnly;
+import std.concurrency: thisTid, Tid, send, spawn, receive, receiveOnly, receiveTimeout;
 import std.algorithm.iteration: filter;
 import std.array: array;
 import std.range.interfaces: InputRange;
+import core.time: dur;
 
 class ClientManager
 {
@@ -88,12 +89,11 @@ void main()
         clientManager.acceptConnection();
 
         writeln("Checking for keyboard input.");
-        string barcodeInput = receiveOnly!string();
-        if (barcodeInput != null) {
-            writeln("KeyboardListenFunc got barcode input: ", barcodeInput);
-            clientManager.messageClients(barcodeInput);
-        } else {
-            writeln("No keyboard input.");
-        }
+
+        receiveTimeout(dur!"msecs"(50),
+                (string s) {
+                clientManager.messageClients(s);
+                }
+                );
     }
 }
